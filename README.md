@@ -214,4 +214,6 @@ In the reported experiments, the full-segment GRU achieved the highest test R²,
 
 The results highlight the importance of temporal context and model specification in neural decoding. The contrast between simulated and real-data performance also motivates further investigation into how linear state-space models can be adapted to the statistical structure of biological signals.
 
-The broader objective is to understand not only which decoder performs best, but also which assumptions and temporal representations explain its performance.
+The broader objective is to understand not only which decoder performs best, but also which assumptions and temporal representations explain its performance.        
+![Hand Velocity Trajectories](pred_vs_true.png)
+
