@@ -2,9 +2,9 @@
 
 An investigation into neural decoding using intracortical spiking activity from the Neural Latents Benchmark (MC_Maze) dataset.
 
-This project compares linear regression, state-space estimation, and recurrent neural networks for predicting hand velocity from motor cortex spike trains. The experiments examine how temporal context and model architecture affect decoding performance, with additional validation controls to investigate unintended information leakage and trial misalignment.
+This project investigates linear regression, state-space estimation, and recurrent neural networks for predicting hand velocity from motor cortex spike trains. The repository currently does not contain an executable end-to-end benchmark for every model listed below. The current `run_benchmark.py` recomputes only the Kalman result; the other values are historical reported scores and are not reproduced by that script.
 
-## 1. Results at a Glance
+## 1. Previously Reported Results (Not Yet Reproduced End-to-End)
 
 | Model Architecture | Input History | Test R² (Mean Across X and Y Velocity) |
 |---|---|---:|
@@ -14,7 +14,7 @@ This project compares linear regression, state-space estimation, and recurrent n
 | GRU (Windowed Input) | 200 ms | 0.888 ± 0.002 |
 | **GRU (Full-Segment History)** | **Entire Segment** | **0.915 ± 0.002** |
 
-*GRU results are reported as mean ± standard deviation across three random initializations. R² values are reported as supplied by the evaluation pipeline. See `results.csv` for the per-axis breakdown and additional evaluation outputs.*
+**Reproducibility status:** The values in this table are historical reported scores, not a fresh, end-to-end comparison produced by the current benchmark runner. The runner currently recomputes only the Kalman decoder score and writes that result to `results.csv`. The Wiener, hybrid, and GRU scores are not recomputed by the runner. The GRU standard deviations (± 0.002) have not been independently verified from saved per-seed predictions or fresh runs. Treat these numbers as provisional until all models are executed on the same held-out trials with documented preprocessing, target alignment, and metric calculation.
 
 ### Key Findings
 
@@ -23,7 +23,7 @@ This project compares linear regression, state-space estimation, and recurrent n
 - **Longer temporal context improved performance:** The full-segment GRU achieved the highest reported R², although this comparison does not isolate sequence length from other architectural or training differences.
 - **Validation controls:** Additional tests examined future-information leakage, cross-trial alignment, and the predictive value of simple temporal or spatial baselines.
 
-These findings apply to the evaluated dataset, model configurations, and validation protocol. They should not be interpreted as a universal ranking of neural decoding architectures.
+These comparisons are provisional because the repository's current runner does not reproduce all listed models. They should not be interpreted as a verified ranking of neural decoding architectures until the full evaluation is executable and controlled.
 
 ---
 
