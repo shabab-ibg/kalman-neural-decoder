@@ -1,42 +1,87 @@
+"""Run the models that are actually implemented in this checkout.
+
+This runner intentionally records only freshly computed metrics. Do not add
+historical scores for models that this script did not execute: that makes
+results.csv look like a reproducible benchmark when it is not.
+
+The current repository checkout must include src/data_pipeline.py and
+src/classic_models.py, plus data/mc_maze_20ms.npz, before this script can run.
+"""
+from pathlib import Path
 import os
+
 import pandas as pd
 import numpy as np
 import torch
-from src.data_pipeline import NLBMazePipeline
-from src.classic_models import SingleLagKalmanDecoder, compute_r2
+
+DATA_PATH = Path("data/mc_maze_20ms.npz")
+RESULTS_PATH = Path("results.csv")
+
 
 def main():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Instantiating tracking routines using backend device hardware: {device}")
-    
-    # Initialize workspace structure safely
-    os.makedirs("data", exist_ok=True)
-    if not os.path.exists("data/mc_maze_20ms.npz"):
-        raise FileNotFoundError("Please ensure your local preprocessed data binary file resides under data/mc_maze_20ms.npz")
-
-    pipeline = NLBMazePipeline("data/mc_maze_20ms.npz", history_len=10, device=device)
-    
-    # 1. State Space Causal Kalman Tracking Routine
-    kf = SingleLagKalmanDecoder(lag_bins=6)
-    kf.fit(pipeline.X, pipeline.Y, pipeline.starts, pipeline.ends, pipeline.tr_s)
-    y_true_kf, y_pred_kf = kf.decode_sequence(pipeline.X, pipeline.Y, pipeline.starts, pipeline.ends, pipeline.test_segs)
-    r2_kf = compute_r2(y_true_kf, y_pred_kf)
-    
-    # 2. Re-create structured metric dataframe matching raw results
-    metrics = [
-        ("Wiener (ridge, 200 ms)", 0.536, 0.534, 0.535),
-        ("Kalman (plain, linear obs.)", r2_kf[0], r2_kf[1], r2_kf.mean()),
-        ("Wiener + Kalman smoother", 0.545, 0.545, 0.545),
-        ("GRU, windowed", 0.910, 0.869, 0.888),
-        ("GRU, full segment history", 0.929, 0.896, 0.915)
+    # Check the repository is complete before importing project modules.
+    required_modules = [
+        Path("src/data_pipeline.py"),
+        Path("src/classic_models.py"),
     ]
-    
-    df = pd.DataFrame(metrics, columns=["model", "R2_vx", "R2_vy", "R2_mean"])
-    print("\n" + "="*60 + "\n          NEURAL DECODING PERFORMANCE RESULTS\n" + "="*60)
+    missing = [str(path) for path in required_modules if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(
+            "This checkout is missing required project source files: "
+            + ", ".join(missing)
+            + ". Restore these modules before running the benchmark. "
+            "No metrics were generated."
+        )
+    if not DATA_PATH.is_file():
+        raise FileNotFoundError(
+            f"Missing dataset at {DATA_PATH}. Place the preprocessed MC_Maze "
+            "file there before running the benchmark. No metrics were generated."
+        )
+
+    # Imports occur after validation so missing files produce a useful message.
+    from src.data_pipeline import NLBMazePipeline
+    from src.classic_models import SingleLagKalmanDecoder, compute_r2
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Running the implemented Kalman decoder on: {device}")
+
+    pipeline = NLBMazePipeline(str(DATA_PATH), history_len=10, device=device)
+    decoder = SingleLagKalmanDecoder(lag_bins=6)
+    decoder.fit(
+        pipeline.X, pipeline.Y, pipeline.starts, pipeline.ends, pipeline.tr_s
+    )
+    y_true, y_pred = decoder.decode_sequence(
+        pipeline.X,
+        pipeline.Y,
+        pipeline.starts,
+        pipeline.ends,
+        pipeline.test_segs,
+    )
+    r2 = np.asarray(compute_r2(y_true, y_pred), dtype=float).reshape(-1)
+    if r2.size < 2 or not np.isfinite(r2[:2]).all():
+        raise ValueError(
+            "compute_r2 must return finite per-axis R² values for vx and vy."
+        )
+
+    # Only include results computed in this run. Other reported model scores
+    # are deliberately excluded until their implementations are executable here.
+    df = pd.DataFrame(
+        [{
+            "model": "Kalman (plain, linear observation)",
+            "R2_vx": float(r2[0]),
+            "R2_vy": float(r2[1]),
+            "R2_mean": float(np.mean(r2[:2])),
+            "status": "computed_this_run",
+        }]
+    )
+    df.to_csv(RESULTS_PATH, index=False)
     print(df.to_string(index=False))
-    
-    df.to_csv("results.csv", index=False)
-    print("\nExecution complete. Output metrics verified and stored in results.csv.")
+    print(f"Saved freshly computed metrics to {RESULTS_PATH}.")
+    print(
+        "Note: this runner evaluates only the Kalman decoder. Wiener, hybrid, "
+        "and GRU results are not reproduced by this script."
+    )
+
 
 if __name__ == "__main__":
     main()
