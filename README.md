@@ -20,6 +20,8 @@ Reported test-set R² values (mean across X- and Y-velocity targets):
 
 The GRU values are reported as mean ± standard deviation across three random initializations. The other values are reported point estimates. These are results from the specific configurations evaluated here, not a universal ranking of model families.
 
+**Reproduction status:** run_benchmark.py currently recomputes the Kalman result from the included dataset. The Wiener, hybrid, and GRU scores in its output are hard-coded reference values; this script does not retrain or reevaluate those models. Do not interpret its generated CSV as a fully rerun comparison.
+
 ### Interpretation
 
 - The tested multi-lag Wiener filter outperformed the tested single-lag Kalman configuration.
@@ -33,16 +35,16 @@ The comparison does not isolate temporal context as the sole cause of the GRU pe
 
 - **Dataset:** Neural Latents Benchmark — MC_Maze.
 - **Input:** Intracortical motor-cortex spike activity.
-- **Target:** Two-dimensional hand velocity, represented as `v = [v_x, v_y]`.
+- **Target:** Two-dimensional hand velocity, represented as v = [v_x, v_y].
 - **Task:** Estimate hand velocity from neural observations.
 
 The decoding objective is:
 
-```text
+~~~text
 v_hat[t] = f(s[1:t])
-```
+~~~
 
-Here, `s[1:t]` denotes the neural observations available up to time `t`, and `f` is the decoding model.
+Here, s[1:t] denotes the neural observations available up to time t, and f is the decoding model.
 
 ## Models
 
@@ -50,16 +52,16 @@ Here, `s[1:t]` denotes the neural observations available up to time `t`, and `f`
 
 The linear baseline uses ridge regression over a history window of neural observations.
 
-```text
+~~~text
 v_hat[t] = W^T * [s[t-L+1], ..., s[t]]^T + b
-```
+~~~
 
 Where:
-- `v_hat[t]` is the predicted two-dimensional velocity at time `t`.
-- `W` contains the fitted regression coefficients.
-- `s[t-L+1] ... s[t]` is the sequence of neural observations in the history window.
-- `L` is the number of time bins in that window.
-- `b` is the intercept.
+- v_hat[t] is the predicted two-dimensional velocity at time t.
+- W contains the fitted regression coefficients.
+- s[t-L+1] ... s[t] is the sequence of neural observations in the history window.
+- L is the number of time bins in that window.
+- b is the intercept.
 
 The reported configuration uses a 200 ms history window.
 
@@ -67,26 +69,26 @@ The reported configuration uses a 200 ms history window.
 
 The decoder is based on a linear state-space model:
 
-```text
+~~~text
 x[t] = A * x[t-1] + w[t]
 
 z[t] = C * x[t-k] + d + v[t]
-```
+~~~
 
 Where:
-- `x[t]` is the latent kinematic state.
-- `z[t]` is the neural observation.
-- `A` is the state-transition matrix.
-- `C` is the observation matrix.
-- `k` is the observation lag.
-- `w[t]` and `v[t]` are process and observation noise.
-- `Q` and `R` denote their covariance matrices.
+- x[t] is the latent kinematic state.
+- z[t] is the neural observation.
+- A is the state-transition matrix.
+- C is the observation matrix.
+- k is the observation lag.
+- w[t] and v[t] are process and observation noise.
+- Q and R denote their covariance matrices.
 
-The reported configuration uses a single-lag observation model with a 120 ms lag. The precise state definition, lag convention, fitting procedure and covariance estimation must be verified against the executable implementation before attempting an exact reproduction.
+The implementation estimates a first-order transition model and a lagged linear observation model from the training segments. The decoder uses a six-bin observation lag by default. At a 20 ms bin width, that corresponds to 120 ms. The filter initializes its state at zero and its covariance from the fitted state samples. These implementation choices matter when interpreting the result, particularly the initial transient and the centering convention.
 
 ### Wiener–Kalman hybrid
 
-The reported hybrid configuration achieved a test R² of 0.545. Its exact construction should be described from the implementation before drawing broader conclusions about hybrid state-space methods.
+The reported hybrid configuration achieved a test R² of 0.545. Its exact construction is not implemented in the current benchmark script, so the score is retained as a reported reference value rather than presented as a reproduced result.
 
 ### GRU
 
@@ -107,20 +109,23 @@ The experiment summary supplied for this project reports the following controls:
 
 The average-position baseline is not presented as a valid control for the velocity task. A position-prediction baseline and a velocity-prediction decoder have different targets and their R² values are not directly comparable.
 
-**Reproducibility limitation:** the current public repository snapshot does not contain the reported `results.csv` file or the imported implementation modules referenced by `run_benchmark.py`. The benchmark script also requires a local preprocessed data file at `data/mc_maze_20ms.npz`. Consequently, the numerical results in this README should be treated as reported experiment results, not independently reproducible from the current public snapshot. The CSV is written by the script at runtime; it is not currently committed.
+## Reproducing the included Kalman benchmark
 
-## What is needed for reproduction
+The repository includes the implementation modules and preprocessed dataset:
 
-A reproducible release should include or clearly document:
+- src/data/classic_models.py
+- src/data/data_pipeline.py
+- src/data/deep_models.py
+- src/data/mc_maze_20ms.npz
 
-1. The decoder implementation modules imported by the benchmark script.
-2. Instructions for obtaining and preprocessing the MC_Maze data, including the expected `data/mc_maze_20ms.npz` format.
-3. Trial-level train/test split construction and the exact test segments.
-4. Neural binning, normalization, smoothing and velocity-target alignment.
-5. Kalman state definition, lag convention, parameter fitting, and covariance estimation.
-6. GRU architecture, hyperparameters, training procedure and random seeds.
-7. The exact R² definition and whether per-axis scores are averaged.
-8. A committed results artifact generated by the documented evaluation command.
+From the repository root, install dependencies and run:
+
+~~~bash
+pip install -r requirements.txt
+python run_benchmark.py
+~~~
+
+The script writes results.csv to the repository root. It recomputes the Kalman row only. The other model rows are fixed reference scores embedded in the script, not fresh evaluations. Full reproduction of the model comparison requires the original training/evaluation procedures and configurations for the Wiener, hybrid, and GRU models.
 
 ## Conclusion
 
