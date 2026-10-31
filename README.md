@@ -1,219 +1,156 @@
-# Decoding Hand Velocity from Motor Cortex Spikes: Kalman, Wiener, and GRU Decoders
+# Kalman Neural Decoder
 
-An investigation into neural decoding using intracortical spiking activity from the Neural Latents Benchmark (MC_Maze) dataset.
+A comparative study of neural decoding methods for predicting two-dimensional hand velocity from intracortical motor-cortex spike activity in the Neural Latents Benchmark (MC_Maze) dataset.
 
-This project compares linear regression, state-space estimation, and recurrent neural networks for predicting hand velocity from motor cortex spike trains. The experiments examine how temporal context and model architecture affect decoding performance, with additional validation controls to investigate unintended information leakage and trial misalignment.
+The project evaluates linear regression, a Kalman state-space decoder, a Wiener–Kalman hybrid, and recurrent neural networks. The central question is how model structure and temporal context affect kinematic decoding.
 
-## 1. Results at a Glance
+> **Scope:** This is an offline analysis of an existing intracortical neural dataset. It is not a real-time brain–computer interface, a wearable EEG system, or a clinical device.
 
-| Model Architecture | Input History | Test R² (Mean Across X and Y Velocity) |
+## Results
+
+The table reports the test-set mean R² across the X- and Y-velocity targets, as recorded in the project experiments.
+
+| Decoder | Temporal input | Test R² |
 |---|---|---:|
-| Wiener Filter (Ridge Regression) | 200 ms | 0.535 |
-| Kalman Filter (Single-Lag Observation Model) | 1 bin, with a 120 ms lag | 0.109 |
-| Wiener–Kalman Hybrid | 200 ms | 0.545 |
-| GRU (Windowed Input) | 200 ms | 0.888 ± 0.002 |
-| **GRU (Full-Segment History)** | **Entire Segment** | **0.915 ± 0.002** |
+| Wiener filter (ridge regression) | 200 ms history | 0.535 |
+| Kalman filter (single-lag observation model) | One observation, 120 ms lag | 0.109 |
+| Wiener–Kalman hybrid | 200 ms history | 0.545 |
+| GRU | 200 ms window | 0.888 ± 0.002 |
+| **GRU** | **Full segment** | **0.915 ± 0.002** |
 
-*GRU results are reported as mean ± standard deviation across three random initializations. R² values are reported as supplied by the evaluation pipeline. See `results.csv` for the per-axis breakdown and additional evaluation outputs.*
+The GRU values are reported as mean ± standard deviation across three random initializations. The other values are the reported experiment scores; no across-seed uncertainty is implied.
 
-### Key Findings
+### What the results suggest
 
-- **Temporal context matters:** The multi-lag Wiener filter substantially outperformed the single-lag Kalman configuration.
-- **Recurrent decoding performed best:** Both GRU configurations achieved higher test R² than the linear baselines in the reported experiments.
-- **Longer temporal context improved performance:** The full-segment GRU achieved the highest reported R², although this comparison does not isolate sequence length from other architectural or training differences.
-- **Validation controls:** Additional tests examined future-information leakage, cross-trial alignment, and the predictive value of simple temporal or spatial baselines.
+- The tested multi-lag Wiener filter outperformed the tested single-lag Kalman configuration.
+- The Wiener–Kalman hybrid slightly exceeded the Wiener baseline in this evaluation.
+- Both GRU configurations achieved higher test R² than the evaluated linear configurations.
+- The full-segment GRU achieved the highest reported score.
 
-These findings apply to the evaluated dataset, model configurations, and validation protocol. They should not be interpreted as a universal ranking of neural decoding architectures.
+These are comparisons between the **specific implementations and evaluation setup in this repository**. They do not establish that GRUs are universally superior to Kalman filters, or that temporal context alone explains the GRU performance. The full-segment and windowed GRUs differ in more than sequence length unless all other architectural and training choices are held constant.
 
----
+## Dataset and task
 
-## 2. Dataset and Objective
+- **Dataset:** Neural Latents Benchmark — MC_Maze.
+- **Input:** Intracortical motor-cortex spike activity.
+- **Target:** Two-dimensional hand velocity, represented as \(\mathbf{v}_t = [v_x, v_y]\).
+- **Task:** Estimate hand velocity from neural observations.
 
-**Dataset:** Neural Latents Benchmark, MC_Maze.
-
-**Task:** Predict hand velocity from intracortical motor cortex spike trains.
-
-The decoding problem can be expressed as:
+In general form, the decoder estimates
 
 \[
-\hat{\mathbf{v}}_t = f(\mathbf{s}_{1:t})
+\hat{\mathbf{v}}_t = f(\mathbf{s}_{1:t}),
 \]
 
-where:
+where \(\mathbf{s}_{1:t}\) denotes the neural observations available to the decoder and \(f\) is the learned or specified decoding function.
 
-- \(\mathbf{s}_{1:t}\) represents the neural observations available up to time \(t\).
-- \(\mathbf{v}_t = [v_x, v_y]\) represents the target hand-velocity vector.
-- \(f\) is the decoding model.
-- \(\hat{\mathbf{v}}_t\) is the predicted velocity.
+The task is kinematic prediction from recorded neural activity. It should not be conflated with decoding arbitrary thoughts, imagined speech, or music.
 
-The central experimental question is how different model families use neural activity and temporal context to reconstruct movement.
+## Decoders
 
-## 3. Model Architectures
+### 1. Wiener filter
 
-### 3.1. Multi-Lag Wiener Filter
-
-The linear baseline uses ridge regression on a history window of neural observations.
-
-For a history of \(L\) bins:
+The Wiener baseline is implemented as ridge regression over a history window of neural observations:
 
 \[
 \hat{\mathbf{v}}_t =
-\mathbf{W}^{\top}
+W^\top
 \begin{bmatrix}
-\mathbf{s}_{t-L+1}\\
-\vdots\\
+\mathbf{s}_{t-L+1} \\
+\vdots \\
 \mathbf{s}_t
 \end{bmatrix}
-+\mathbf{b}
++ \mathbf{b}.
 \]
 
-Here, \(\mathbf{W}\) contains the learned regression coefficients and \(\mathbf{b}\) is the intercept.
+The reported configuration uses a 200 ms history window. This provides a linear baseline that can use multiple recent observations rather than relying on a single time bin.
 
-The reported configuration uses a 200 ms history window.
+### 2. Kalman filter
 
-This model provides a linear baseline for measuring the predictive value of temporally extended neural activity.
-
-### 3.2. State-Space Kalman Filter
-
-The Kalman decoder uses a linear state-space formulation:
+The Kalman decoder uses a linear state-space model. In generic form:
 
 \[
-\mathbf{x}_t = A\mathbf{x}_{t-1}+\mathbf{w}_t
+\mathbf{x}_t = A\mathbf{x}_{t-1} + \mathbf{w}_t,
 \]
 
 \[
-\mathbf{z}_t = C\mathbf{x}_{t-k}+\mathbf{d}+\mathbf{v}_t
+\mathbf{z}_t = C\mathbf{x}_{t-k} + \mathbf{d} + \mathbf{v}_t,
 \]
 
-where:
+where \(\mathbf{x}_t\) is the kinematic state, \(\mathbf{z}_t\) is the neural observation, \(A\) is the state-transition matrix, \(C\) is the observation matrix, and \(k\) denotes the implemented observation lag. The noise terms are commonly modelled with covariance matrices \(Q\) and \(R\).
 
-- \(\mathbf{x}_t\) is the latent kinematic state.
-- \(\mathbf{z}_t\) is the neural observation vector.
-- \(A\) describes state transitions.
-- \(C\) maps the latent state to neural observations.
-- \(\mathbf{w}_t\) and \(\mathbf{v}_t\) represent process and observation noise.
-- \(k\) denotes the observation lag used in the implemented model.
+The evaluated configuration uses a single-lag observation model with a reported 120 ms lag. The exact state definition, lag convention, fitting procedure and covariance estimation should be taken from the implementation when reproducing the experiment.
 
-Under the standard formulation, the noise terms are assumed to be Gaussian, with covariance matrices \(Q\) and \(R\), respectively.
+### 3. Wiener–Kalman hybrid
 
-The evaluated configuration uses a single-lag observation model. Its performance is compared against models that explicitly incorporate a longer history of neural activity.
+The hybrid combines the project's linear temporal-regression and state-space components. It achieved a reported test R² of 0.545. The exact construction and fitting procedure should be inspected in the implementation before interpreting it as a general hybrid architecture.
 
-**Implementation note:** The exact state variables, lag convention, and observation timing should be documented alongside the equations to make the formulation reproducible.
+### 4. GRU
 
-### 3.3. Gated Recurrent Unit (GRU)
-
-The GRU decoder models temporal dependencies in neural activity using gated recurrent units.
+A gated recurrent unit (GRU) network models temporal dependencies in the neural observations.
 
 Two configurations were evaluated:
 
-- **Windowed GRU:** Uses a 200 ms history of neural observations.
-- **Full-segment GRU:** Processes the available sequence across an entire segment.
+- **Windowed GRU:** receives a 200 ms input window.
+- **Full-segment GRU:** processes the available sequence across a full segment.
 
-The windowed model restricts the temporal context presented to the network. The full-segment model can exploit a longer sequence, potentially capturing temporal relationships that are unavailable to short-window models.
+The full-segment configuration achieved the highest reported test R². This is an empirical result for the evaluated setup, not proof that longer input sequences will always improve neural decoding.
 
-The full-segment configuration achieved the highest reported test R².
+## Validation and controls
 
-The comparison evaluates these specific implementations; additional controlled experiments would be required to attribute the performance difference exclusively to sequence length.
+The experiments include additional checks intended to probe alignment and unintended predictive information.
 
----
+### Future-information perturbation
 
-## 4. Comparative Analysis
+Future tracking inputs were replaced with uniform random noise, and predictions for past velocity coordinates were compared. The reported change was zero.
 
-The single-lag Kalman filter achieved a test R² of 0.109, compared with 0.535 for the multi-lag Wiener filter.
+This establishes invariance to that particular perturbation. It does **not**, by itself, prove that every stage of preprocessing, training and evaluation is free of temporal leakage.
 
-The Wiener–Kalman hybrid achieved 0.545, while the two GRU configurations reached 0.888 and 0.915.
+### Cross-trial control
 
-These results suggest that the temporal representation and model configuration are important factors in this decoding task.
+Movement blocks were shuffled across trials. The reported R² was approximately -1.0, indicating poor predictive performance under the tested shuffled condition. Interpretation depends on the precise shuffle procedure and evaluation split.
 
-### Why did the single-lag Kalman configuration underperform?
+### Average-position baseline
 
-Several explanations merit investigation:
+A simple average-position baseline reportedly produced an R² near zero. Because this baseline predicts position while the main task predicts velocity, its score should not be treated as a directly comparable decoder result unless the target definitions and evaluation procedure are made identical.
 
-**1. Restricted temporal context**
+### Simulation check
 
-The Wiener filter incorporates a 200 ms history window, whereas the evaluated Kalman configuration uses a single-lag observation model. This difference may limit the information available to the Kalman decoder.
+The Kalman implementation was also tested on simulated trajectories generated under the intended Gaussian state-space assumptions. The reported simulation result was approximately \(R^2 = 0.55\).
 
-**2. Neural population structure**
+This is an implementation sanity check under controlled assumptions. It does not establish that the model is correctly specified or optimally tuned for real neural recordings.
 
-Intracortical spike trains can be sparse and heterogeneous. The relationship between population activity and movement may not be adequately represented by the particular linear observation model used here.
+## Evaluation considerations
 
-**3. Model specification**
+The reported scores should be interpreted alongside the evaluation protocol. A reproducible comparison should document:
 
-The choice of latent state, observation mapping, lag alignment, and noise covariance can affect Kalman decoding performance. These factors should be examined before attributing the performance difference to inherent limitations of linear state-space models.
+- How train, validation and test sets are split, including whether splitting is by trial or time bin.
+- Neural preprocessing, binning, normalization and any smoothing.
+- The construction and temporal alignment of velocity targets.
+- The exact state definition and observation lag used by the Kalman model.
+- Model hyperparameters, regularization and training procedures.
+- Whether every model is evaluated on identical held-out observations.
+- The definition of R² and whether it is computed separately per axis before averaging.
+- Which sources of variability are represented by the reported GRU standard deviations.
 
-The current results establish a performance difference between the evaluated configurations. They do not independently establish which of these mechanisms explains that difference.
+A high score is meaningful only if the test set is held out appropriately and the same evaluation rules are applied across models.
 
----
+## Limitations
 
-## 5. Validation and Sanity Controls
+- The results concern one dataset and one decoding task.
+- Intracortical spike recordings are not equivalent to non-invasive scalp EEG.
+- The comparison covers particular model configurations, not every possible Kalman, Wiener or recurrent decoder.
+- The reported controls address specific failure modes; they are not a complete audit of the pipeline.
+- The README's summary metrics should be checked against the underlying result files and scripts before being treated as independently reproduced.
 
-Additional controls were implemented to investigate whether the reported decoding performance depended on unintended information leakage or trial-specific alignment.
+## Reproducibility
 
-### 5.1. Future-Information Leakage Test
+The experiment summary above records the reported configurations and scores. For exact reproduction, consult the source code and dataset preparation steps in the repository. Add the precise environment, dependency versions, dataset access instructions, preprocessing configuration, training commands and evaluation commands here as those details are verified.
 
-Future tracking inputs were replaced with uniform random noise, and the resulting predictions for past velocity coordinates were compared.
+## Conclusion
 
-The reported change was zero.
+In these experiments, the full-segment GRU achieved the highest reported test R² (0.915 ± 0.002), while the single-lag Kalman configuration scored substantially lower (0.109) than the multi-lag Wiener baseline (0.535).
 
-This is evidence that the tested predictions were invariant to that particular perturbation. It does not independently prove that the entire training and evaluation pipeline is free of temporal leakage.
+The defensible conclusion is not that Kalman filtering is inherently inferior. The evaluated Kalman configuration used a restricted observation history, and its state-space specification may not have captured the temporal structure available to the other models. Further controlled comparisons are needed to isolate the causes of the performance gap.
 
-### 5.2. Cross-Trial Control
-
-Movement blocks were shuffled across trials to test whether decoding performance depended on the alignment between neural activity and its corresponding movement targets.
-
-The reported control produced an R² of approximately -1.0.
-
-This indicates poor predictive performance under the tested shuffled condition. The precise interpretation depends on the shuffling procedure and the definition of the evaluation set.
-
-### 5.3. Baseline Control
-
-A simple average-position baseline was evaluated, producing a reported R² near zero.
-
-This provides a reference for interpreting the predictive performance of the trained models.
-
-Because this baseline predicts position while the principal task predicts velocity, the target definitions should be checked before treating the scores as directly comparable.
-
----
-
-## 6. Simulation-Based Validation
-
-The Kalman implementation was also evaluated on simulated trajectories generated under the intended Gaussian state-space assumptions.
-
-The reported simulation result was approximately \(R^2 = 0.55\).
-
-This experiment provides a useful implementation check under controlled conditions. It suggests that the model can recover meaningful structure in simulated data, but it does not establish that the model is optimally specified for real neural recordings.
-
-The difference between simulated and real-data performance motivates further investigation of observation-model design, temporal context, and neural-to-kinematic relationships.
-
----
-
-## 7. Reproducibility and Evaluation
-
-The reported evaluation includes comparisons across multiple model configurations and three random initializations for the GRU experiments.
-
-The repository's results artifacts include per-axis evaluation outputs in `results.csv`.
-
-For a reproducible comparison, the evaluation protocol should specify:
-
-- Train, validation, and test split construction.
-- Whether splitting occurs at the trial or time-bin level.
-- Neural activity preprocessing and normalization.
-- Velocity target construction and temporal alignment.
-- Model hyperparameters and regularization.
-- The precise definition of the reported R² metric.
-- Whether all models use identical held-out test observations.
-- Whether the reported GRU variability reflects random initialization alone or any additional sources of variation.
-
-These details are essential for interpreting differences between model architectures.
-
-## 8. Conclusion
-
-This project compares linear filters, a state-space Kalman decoder, and recurrent neural networks for predicting hand velocity from motor cortex activity.
-
-In the reported experiments, the full-segment GRU achieved the highest test R², followed by the windowed GRU. Both outperformed the evaluated linear baselines.
-
-The results highlight the importance of temporal context and model specification in neural decoding. The contrast between simulated and real-data performance also motivates further investigation into how linear state-space models can be adapted to the statistical structure of biological signals.
-
-The broader objective is to understand not only which decoder performs best, but also which assumptions and temporal representations explain its performance.        
-![Hand Velocity Trajectories](pred_vs_true.png)
-
+The project is an investigation into how temporal representations and model assumptions affect neural-to-kinematic decoding.
