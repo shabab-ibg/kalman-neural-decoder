@@ -33,49 +33,42 @@ The comparison does not isolate temporal context as the sole cause of the GRU pe
 
 - **Dataset:** Neural Latents Benchmark — MC_Maze.
 - **Input:** Intracortical motor-cortex spike activity.
-- **Target:** Two-dimensional hand velocity, \(\mathbf{v}_t = [v_{x,t}, v_{y,t}]\).
+- **Target:** Two-dimensional hand velocity, represented as `v = [v_x, v_y]`.
 - **Task:** Estimate hand velocity from neural observations.
 
-The decoding objective is
+The decoding objective is:
 
 $$
-\hat{\mathbf{v}}_t = f(\mathbf{s}_{1:t}),
+\hat{v}_t = f(s_{1:t})
 $$
 
-where \(\mathbf{s}_{1:t}\) denotes the neural observations available up to time \(t\), and \(f\) is the decoding model.
+Here, `s_{1:t}` means the neural observations available up to time `t`, and `f` is the decoding model.
 
 ## Models
 
 ### Wiener filter
 
-The linear baseline uses ridge regression over a history window of neural observations:
+The linear baseline uses ridge regression over a history window of neural observations. To keep the equation compatible with GitHub's mobile renderer, the observation history is written as a compact vector:
 
 $$
-\hat{\mathbf{v}}_t =
-W^\top
-\begin{bmatrix}
-\mathbf{s}_{t-L+1} \\
-\vdots \\
-\mathbf{s}_t
-\end{bmatrix}
-+ \mathbf{b}.
+\hat{v}_t = W^T [s_{t-L+1}, \ldots, s_t]^T + b
 $$
 
-The reported configuration uses a 200 ms history window.
+Here, `W` contains the fitted regression coefficients, `b` is the intercept, and `L` is the number of time bins in the history window. The reported configuration uses a 200 ms history window.
 
 ### Kalman filter
 
 The decoder is based on a linear state-space model:
 
 $$
-\mathbf{x}_t = A\mathbf{x}_{t-1} + \mathbf{w}_t,
+x_t = A x_{t-1} + w_t
 $$
 
 $$
-\mathbf{z}_t = C\mathbf{x}_{t-k} + \mathbf{d} + \mathbf{v}_t,
+z_t = C x_{t-k} + d + v_t
 $$
 
-where \(\mathbf{x}_t\) is the latent kinematic state, \(\mathbf{z}_t\) is the neural observation, \(A\) is the state-transition matrix, \(C\) is the observation matrix, and \(k\) denotes the observation lag. The noise terms are modelled using covariance matrices \(Q\) and \(R\).
+Here, `x_t` is the latent kinematic state, `z_t` is the neural observation, `A` is the state-transition matrix, `C` is the observation matrix, and `k` denotes the observation lag. The noise terms are modelled using covariance matrices `Q` and `R`.
 
 The reported configuration uses a single-lag observation model with a 120 ms lag. The precise state definition, lag convention, fitting procedure and covariance estimation must be verified against the executable implementation before attempting an exact reproduction.
 
