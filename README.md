@@ -38,37 +38,49 @@ The comparison does not isolate temporal context as the sole cause of the GRU pe
 
 The decoding objective is:
 
-$$
-\hat{v}_t = f(s_{1:t})
-$$
+```text
+v_hat[t] = f(s[1:t])
+```
 
-Here, `s_{1:t}` means the neural observations available up to time `t`, and `f` is the decoding model.
+Here, `s[1:t]` denotes the neural observations available up to time `t`, and `f` is the decoding model.
 
 ## Models
 
 ### Wiener filter
 
-The linear baseline uses ridge regression over a history window of neural observations. To keep the equation compatible with GitHub's mobile renderer, the observation history is written as a compact vector:
+The linear baseline uses ridge regression over a history window of neural observations.
 
-$$
-\hat{v}_t = W^T [s_{t-L+1}, \ldots, s_t]^T + b
-$$
+```text
+v_hat[t] = W^T * [s[t-L+1], ..., s[t]]^T + b
+```
 
-Here, `W` contains the fitted regression coefficients, `b` is the intercept, and `L` is the number of time bins in the history window. The reported configuration uses a 200 ms history window.
+Where:
+- `v_hat[t]` is the predicted two-dimensional velocity at time `t`.
+- `W` contains the fitted regression coefficients.
+- `s[t-L+1] ... s[t]` is the sequence of neural observations in the history window.
+- `L` is the number of time bins in that window.
+- `b` is the intercept.
+
+The reported configuration uses a 200 ms history window.
 
 ### Kalman filter
 
 The decoder is based on a linear state-space model:
 
-$$
-x_t = A x_{t-1} + w_t
-$$
+```text
+x[t] = A * x[t-1] + w[t]
 
-$$
-z_t = C x_{t-k} + d + v_t
-$$
+z[t] = C * x[t-k] + d + v[t]
+```
 
-Here, `x_t` is the latent kinematic state, `z_t` is the neural observation, `A` is the state-transition matrix, `C` is the observation matrix, and `k` denotes the observation lag. The noise terms are modelled using covariance matrices `Q` and `R`.
+Where:
+- `x[t]` is the latent kinematic state.
+- `z[t]` is the neural observation.
+- `A` is the state-transition matrix.
+- `C` is the observation matrix.
+- `k` is the observation lag.
+- `w[t]` and `v[t]` are process and observation noise.
+- `Q` and `R` denote their covariance matrices.
 
 The reported configuration uses a single-lag observation model with a 120 ms lag. The precise state definition, lag convention, fitting procedure and covariance estimation must be verified against the executable implementation before attempting an exact reproduction.
 
