@@ -1,136 +1,122 @@
 # Kalman Neural Decoder
 
-A comparative study of neural decoding methods for predicting two-dimensional hand velocity from intracortical motor-cortex spike activity in the Neural Latents Benchmark (MC_Maze) dataset.
+Offline decoding of two-dimensional hand velocity from intracortical motor-cortex spike counts in the Neural Latents Benchmark (NLB) MC_Maze dataset.
 
-The reported experiments compare a multi-lag Wiener filter, a single-lag Kalman decoder, a Wiener–Kalman hybrid, and two GRU configurations.
+This repository contains a single-lag linear Kalman decoder, data preparation utilities, GRU model definitions, and a preprocessed 20 ms MC_Maze dataset. The current benchmark runner evaluates the Kalman decoder only. Historical Wiener, hybrid, and GRU scores are reported separately and are not reproduced by the runner.
 
-> **Scope:** This is an offline analysis of an existing intracortical neural dataset. It is not a real-time BCI, a wearable EEG system, or a clinical device.
+> **Scope:** This is offline analysis of an existing intracortical dataset. It is not a real-time BCI, wearable EEG system, or clinical device.
 
-## Results
+## Reported results
 
-Reported test-set R² values (mean across X- and Y-velocity targets):
+The following values are historical experiment results supplied for this project. Only the Kalman row is recalculated by the current `run_benchmark.py`.
 
-| Decoder | Temporal input | Test R² |
+| Decoder | Temporal input | Reported mean test R² |
 |---|---|---:|
 | Wiener filter (ridge regression) | 200 ms history | 0.535 |
-| Kalman filter (single-lag observation model) | One observation, 120 ms lag | 0.109 |
+| Single-lag Kalman decoder | Neural observation lag: 120 ms | 0.109 |
 | Wiener–Kalman hybrid | 200 ms history | 0.545 |
-| GRU | 200 ms window | 0.888 ± 0.002 |
-| **GRU** | **Full-segment history** | **0.915 ± 0.002** |
+| Windowed GRU | 200 ms window | 0.888 ± 0.002 |
+| Full-segment GRU | Full segment | 0.915 ± 0.002 |
 
-The GRU values are reported as mean ± standard deviation across three random initializations. The other values are reported point estimates. These are results from the specific configurations evaluated here, not a universal ranking of model families.
+The GRU uncertainties were reported as standard deviations across three random initializations; the underlying per-seed predictions are not included here. The non-Kalman scores are not freshly evaluated by the current runner. Treat this table as a record of reported results, not as a fully reproducible model comparison.
 
-**Reproduction status:** run_benchmark.py currently recomputes the Kalman result from the included dataset. The Wiener, hybrid, and GRU scores in its output are hard-coded reference values; this script does not retrain or reevaluate those models. Do not interpret its generated CSV as a fully rerun comparison.
+## Dataset and target
 
-### Interpretation
+- **Dataset:** NLB MC_Maze, preprocessed at 20 ms per bin.
+- **Input:** binned intracortical spike counts, loaded as `X`.
+- **Target:** planar hand velocity, loaded as `Y`, with two columns: horizontal velocity (v_x) and vertical velocity (v_y).
+- **Task:** predict the two-dimensional velocity from lagged neural observations.
 
-- The tested multi-lag Wiener filter outperformed the tested single-lag Kalman configuration.
-- The Wiener–Kalman hybrid slightly exceeded the Wiener baseline in the reported evaluation.
-- Both GRU configurations achieved higher reported test R² than the linear configurations.
-- The full-segment GRU achieved the highest reported score.
+The Kalman state is the two-dimensional velocity vector:
 
-The comparison does not isolate temporal context as the sole cause of the GRU performance difference. Model capacity, optimization, regularization, training procedure and input representation may also differ.
+$$
+x_t = \begin{bmatrix}v_x(t)\\v_y(t)\end{bmatrix}.
+$$
 
-## Dataset and objective
+There are no additional latent position or acceleration coordinates in this implementation. The observation (z_t) is the vector of neural spike counts across recorded units.
 
-- **Dataset:** Neural Latents Benchmark — MC_Maze.
-- **Input:** Intracortical motor-cortex spike activity.
-- **Target:** Two-dimensional hand velocity, represented as v = [v_x, v_y].
-- **Task:** Estimate hand velocity from neural observations.
+## Kalman model and exact lag convention
 
-The decoding objective is:
+The implementation fits a first-order linear transition model to consecutive velocity samples:
 
-~~~text
-v_hat[t] = f(s[1:t])
-~~~
+$$
+x_t = A x_{t-1} + w_t,
+$$
 
-Here, s[1:t] denotes the neural observations available up to time t, and f is the decoding model.
+and a linear observation model with a fixed neural-to-kinematic delay:
 
-## Models
+$$
+z_{t-k} = Cx_t + d + v_t.
+$$
 
-### Wiener filter
+Here, (A) is the (2\times2) velocity transition matrix, (C) maps the two-dimensional velocity state to the neural population, (d) is the observation intercept, and (w_t) and (v_t) are process and observation noise with fitted covariance matrices (Q) and (R).
 
-The linear baseline uses ridge regression over a history window of neural observations.
+**Lag convention in the code:** with `lag_bins=k`, the fitting pairs are `X[a:b-k]` with `Y[a+k:b]`. During decoding, at local target index `t`, the filter consumes `X[a+t-k]` to estimate `Y[a+t]`. Thus the neural observation precedes the velocity target by exactly (k) bins. The default is (k=6); at 20 ms per bin this is 120 ms. It is not a six-bin history window: the observation model uses one neural population vector delayed by six bins.
 
-~~~text
-v_hat[t] = W^T * [s[t-L+1], ..., s[t]]^T + b
-~~~
+The state is represented internally in mean-centred coordinates. The mean `mu` is estimated from the lagged training targets `Y[a+k:b]`, and is added back to decoded states. The decoder initializes its centred state at zero and its covariance from the fitted training states. The first predictions therefore include an initialization transient.
 
-Where:
-- v_hat[t] is the predicted two-dimensional velocity at time t.
-- W contains the fitted regression coefficients.
-- s[t-L+1] ... s[t] is the sequence of neural observations in the history window.
-- L is the number of time bins in that window.
-- b is the intercept.
+## Data split and leakage boundary
 
-The reported configuration uses a 200 ms history window.
+The preprocessed NPZ file supplies `train_segs` and `test_segs`; this repository does not randomly split individual time bins. The pipeline takes the first `floor(0.2 * len(train_segs))` entries of the supplied training-segment array as validation segments and uses the remaining entries for parameter fitting. The supplied `test_segs` are used only for final decoding.
 
-### Kalman filter
+Consequently, the implemented split is **segment-index-level**, not a random time-bin split. In this dataset representation, each segment is a contiguous interval addressed by its corresponding `starts[s]:ends[s]` pair. The code keeps whole intervals together when assigning train, validation, and test segment IDs. It does not independently verify from raw session/trial metadata that every segment ID corresponds to a unique biological trial or that no trial was divided upstream when the NPZ was created. Therefore, trial-level independence is only as reliable as the provenance of the supplied `train_segs` and `test_segs`; the repository code alone cannot certify the upstream split. No claim of session-level generalization is made.
 
-The decoder is based on a linear state-space model:
+The validation subset is selected by array order, not by a seeded random permutation. Reproducing the same validation assignment requires the same ordering of `train_segs` in the NPZ file.
 
-~~~text
-x[t] = A * x[t-1] + w[t]
+## R² definition
 
-z[t] = C * x[t-k] + d + v[t]
-~~~
+For each velocity component (j\in\{x,y\}), predictions and targets from all decoded test segments are concatenated. The code computes the coefficient of determination over that pooled set:
 
-Where:
-- x[t] is the latent kinematic state.
-- z[t] is the neural observation.
-- A is the state-transition matrix.
-- C is the observation matrix.
-- k is the observation lag.
-- w[t] and v[t] are process and observation noise.
-- Q and R denote their covariance matrices.
+$$
+R^2_j = 1 -
+\frac{\sum_{i=1}^{N}(y_{ij}-\hat y_{ij})^2}
+{\sum_{i=1}^{N}(y_{ij}-\bar y_j)^2},
+\qquad
+\bar y_j = \frac{1}{N}\sum_{i=1}^{N}y_{ij}.
+$$
 
-The implementation estimates a first-order transition model and a lagged linear observation model from the training segments. The decoder uses a six-bin observation lag by default. At a 20 ms bin width, that corresponds to 120 ms. The filter initializes its state at zero and its covariance from the fitted state samples. These implementation choices matter when interpreting the result, particularly the initial transient and the centering convention.
+The reported mean is the unweighted arithmetic average of the two axis-specific values:
 
-### Wiener–Kalman hybrid
+$$
+R^2_{\mathrm{mean}} = \frac{R^2_x+R^2_y}{2}.
+$$
 
-The reported hybrid configuration achieved a test R² of 0.545. Its exact construction is not implemented in the current benchmark script, so the score is retained as a reported reference value rather than presented as a reproduced result.
+This is not the average of per-trial R² values. It is pooled across the concatenated test samples separately for each axis. A constant target component would make its denominator zero and the score undefined.
 
-### GRU
+## Repository contents
 
-A gated recurrent unit network models temporal dependencies in the neural observations.
+- `run_benchmark.py`: executes the implemented Kalman evaluation and writes `results.csv`.
+- `src/data/classic_models.py`: Kalman decoder and R² function.
+- `src/data/data_pipeline.py`: dataset loading and feature/tensor preparation.
+- `src/data/deep_models.py`: GRU model definitions.
+- `src/data/mc_maze_20ms.npz`: preprocessed dataset used by the runner.
+- `pred_vs_true.png`: example prediction plot.
 
-- **Windowed GRU:** 200 ms input window.
-- **Full-segment GRU:** processes the available sequence across a segment.
+## Reproduce the implemented Kalman result
 
-The full-segment configuration achieved the highest reported score. This result applies to the evaluated implementation and does not prove that longer sequences always improve decoding.
-
-## Validation status and limitations
-
-The experiment summary supplied for this project reports the following controls:
-
-- **Future-information perturbation:** replacing future tracking inputs with uniform random noise reportedly produced no change in the tested past-velocity predictions. This checks one specific perturbation; it is not a complete proof that the pipeline is free of temporal leakage.
-- **Cross-trial control:** shuffling movement blocks across trials reportedly reduced performance to approximately R² = -1.0. Interpretation depends on the exact shuffle and split procedure.
-- **Simulation check:** a Kalman-model simulation reportedly produced approximately R² = 0.55. This value is not sufficient to establish correct implementation or optimal estimation. Under a correctly specified linear-Gaussian model, with matched dynamics, observation model, noise covariances, initialization and evaluation targets, the Kalman filter should be an appropriate minimum-mean-square-error estimator. A substantially lower R² can arise from model/target mismatch, incorrect lag or time alignment, parameter estimation error, initialization/transient effects, noise covariance mismatch, or an R² calculation issue. The simulation generator, parameter values, initialization, burn-in, and metric calculation need to be inspected before this result can be explained conclusively.
-
-The average-position baseline is not presented as a valid control for the velocity task. A position-prediction baseline and a velocity-prediction decoder have different targets and their R² values are not directly comparable.
-
-## Reproducing the included Kalman benchmark
-
-The repository includes the implementation modules and preprocessed dataset:
-
-- src/data/classic_models.py
-- src/data/data_pipeline.py
-- src/data/deep_models.py
-- src/data/mc_maze_20ms.npz
-
-From the repository root, install dependencies and run:
+The preprocessed dataset is committed in this repository, so no separate dataset download is required for this exact run.
 
 ~~~bash
-pip install -r requirements.txt
+git clone https://github.com/shabab-ibg/kalman-neural-decoder.git
+cd kalman-neural-decoder
+python -m pip install -r requirements.txt
 python run_benchmark.py
 ~~~
 
-The script writes results.csv to the repository root. It recomputes the Kalman row only. The other model rows are fixed reference scores embedded in the script, not fresh evaluations. Full reproduction of the model comparison requires the original training/evaluation procedures and configurations for the Wiener, hybrid, and GRU models.
+The command writes `results.csv` in the repository root. That file is a generated output and is not committed by default. The command recomputes only the Kalman row. It does not train or evaluate the Wiener, hybrid, or GRU models.
 
-## Conclusion
+For the original MC_Maze dataset and benchmark documentation, see the [Neural Latents Benchmark](https://neurallatents.github.io/) and the [NLB tools repository](https://github.com/neurallatents/nlb_tools). The committed NPZ is the direct input expected by this project; obtaining the upstream raw data is not part of the one-command reproduction path above.
 
-In the reported experiments, the full-segment GRU achieved the highest test R² (0.915 ± 0.002). The single-lag Kalman configuration scored 0.109, below the multi-lag Wiener baseline at 0.535.
+## Limitations
 
-The defensible conclusion is that the evaluated configurations performed differently. The results do not show that Kalman filtering is inherently inferior. Its state-space specification, observation lag, parameter estimation and temporal representation require further controlled investigation.
+- The current runner does not reproduce the historical Wiener, hybrid, or GRU metrics.
+- The saved GRU mean ± standard deviation values cannot be independently checked without per-seed outputs or training scripts.
+- The current Kalman implementation is a simple linear state-space decoder with a lagged observation. It should not be interpreted as an optimized or universally representative Kalman baseline.
+- The reported simulation check (approximately R² = 0.55) has not been independently validated against a fully specified synthetic data generator, matched initialization, burn-in, and noise covariance settings.
+- The average-position baseline is not a valid comparator for a velocity-prediction target.
+
+## References
+
+Pei et al., [Neural Latents Benchmark '21: Evaluating latent variable models of neural population activity](https://arxiv.org/abs/2109.04463), NeurIPS 2021.
 
 ![Predicted versus true hand velocity](pred_vs_true.png)
